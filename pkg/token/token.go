@@ -564,14 +564,23 @@ func (v tokenVerifier) Verify(token string) (*Identity, error) {
 	req.Header.Set(clusterIDHeader, v.clusterID)
 	req.Header.Set("accept", "application/json")
 
+	stsEndpointType := metrics.InvalidSTSEndpoint
+	if parsedURL.Host == "sts.amazonaws.com" {
+		stsEndpointType = metrics.STSGlobal
+	} else if strings.HasPrefix(parsedURL.Host, "sts.") {
+		stsEndpointType = metrics.STSRegional
+	}
+
+	logrus.Infof("Sending request to %s endpoint, host: %s", stsEndpointType, parsedURL.Host)
+
 	response, err := v.client.Do(req)
 	if err != nil {
-		metrics.Get().StsConnectionFailure.Inc()
+		metrics.Get().StsConnectionFailure.WithLabelValues(stsEndpointType).Inc()
 		// special case to avoid printing the full URL if possible
 		if urlErr, ok := err.(*url.Error); ok {
-			return nil, NewSTSError(fmt.Sprintf("error during GET: %v", urlErr.Err))
+			return nil, NewSTSError(fmt.Sprintf("error during GET: %v on %s endpoint", urlErr.Err, stsEndpointType))
 		}
-		return nil, NewSTSError(fmt.Sprintf("error during GET: %v", err))
+		return nil, NewSTSError(fmt.Sprintf("error during GET: %v on %s endpoint", err, stsEndpointType))
 	}
 	defer response.Body.Close()
 
